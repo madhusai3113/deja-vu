@@ -3890,12 +3890,28 @@ func commonDir(paths []string) string {
 	return dir
 }
 
-// projectExcludePatterns is how many lines in the exclude file are project
-// patterns. A `harness:` line lives in the same file and is not one, so
-// counting them together reported "excluded-patterns=1" against every store on
-// a machine whose only rule was "never read this one" (#3499).
+// projectExcludePatterns counts project rules from the file and environment.
+// Count them directly: excluded stores can also come from the environment,
+// and duplicate harness rules do not each add a store (#5401).
 func projectExcludePatterns() int {
-	return len(sources.ExclusionPatterns()) - len(sources.ExcludedHarnesses())
+	n := 0
+	for _, pattern := range sources.ExclusionPatterns() {
+		if !strings.HasPrefix(pattern, "harness:") {
+			n++
+		}
+	}
+	return n
+}
+
+// An environment exclusion must not be attributed to the exclude file.
+// Prefer the environment when both settings exclude the same store.
+func harnessExclusionReason(name string) string {
+	for _, excluded := range strings.Split(os.Getenv("DEJA_EXCLUDE_HARNESSES"), ",") {
+		if strings.EqualFold(strings.TrimSpace(excluded), name) {
+			return "excluded — DEJA_EXCLUDE_HARNESSES"
+		}
+	}
+	return fmt.Sprintf("excluded — `harness:%s` is in %s", name, sources.ExcludePath())
 }
 
 func printSources(dir string) {
@@ -4007,8 +4023,7 @@ func printSourcesTo(w io.Writer, dir string) {
 		// just been told never to open, which is the opposite of what this
 		// screen is for (#3499).
 		if skipStore[it.name] {
-			fmt.Fprintf(w, "%s\t%s\texcluded — `harness:%s` is in %s\n",
-				it.name, it.location, it.name, sources.ExcludePath())
+			fmt.Fprintf(w, "%s\t%s\t%s\n", it.name, it.location, harnessExclusionReason(it.name))
 			continue
 		}
 		redacted := 0
@@ -4073,8 +4088,7 @@ func printSourcesTo(w io.Writer, dir string) {
 		if !skipStore[name] {
 			return false
 		}
-		fmt.Fprintf(w, "%s\t%s\texcluded — `harness:%s` is in %s\n",
-			name, location, name, sources.ExcludePath())
+		fmt.Fprintf(w, "%s\t%s\t%s\n", name, location, harnessExclusionReason(name))
 		return true
 	}
 	aiderFiles := sources.AiderFiles()
