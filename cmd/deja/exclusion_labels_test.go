@@ -71,3 +71,44 @@ func TestSourcesNamesTheHarnessExclusionSetting(t *testing.T) {
 		})
 	}
 }
+
+func TestHiddenByOwnSettingsNamesProjectCountsAndHarnessSettings(t *testing.T) {
+	for _, tc := range []struct {
+		name, file, harnesses  string
+		wantProject, wantStore string
+	}{
+		{"environment with project", "secret\n", "codex", "1 project pattern excluded", "1 store not read at all (DEJA_EXCLUDE_HARNESSES)"},
+		{"environment only", "", " CoDeX , codex ", "", "1 store not read at all (DEJA_EXCLUDE_HARNESSES)"},
+		{"file", "secret\nharness:codex\nharness:codex\n", "", "1 project pattern excluded", "1 store not read at all ($file)"},
+		{"both for one store", "secret\nharness:codex\n", "codex", "1 project pattern excluded", "1 store not read at all (DEJA_EXCLUDE_HARNESSES)"},
+		{"different stores", "secret\nharness:aider\n", "codex", "1 project pattern excluded", "2 stores not read at all ("},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			hermeticEnv(t)
+			t.Setenv("DEJA_EXCLUDE_PROJECTS", "")
+			t.Setenv("DEJA_EXCLUDE_HARNESSES", tc.harnesses)
+			writeExclude(t, tc.file)
+			got := hiddenByOwnSettings()
+			if tc.wantProject == "" {
+				if strings.Contains(got, "project pattern") {
+					t.Errorf("a harness rule was counted as a project: %s", got)
+				}
+			} else if !strings.Contains(got, tc.wantProject) {
+				t.Errorf("missing %q in %q", tc.wantProject, got)
+			}
+			wantStore := strings.ReplaceAll(tc.wantStore, "$file", sources.ExcludePath())
+			start := strings.Index(got, wantStore)
+			if start < 0 {
+				t.Fatalf("missing %q in %q", wantStore, got)
+			}
+			if tc.name == "different stores" {
+				storeNote := got[start:]
+				for _, setting := range []string{sources.ExcludePath(), "DEJA_EXCLUDE_HARNESSES"} {
+					if !strings.Contains(storeNote, setting) {
+						t.Errorf("store note does not name %s: %s", setting, storeNote)
+					}
+				}
+			}
+		})
+	}
+}

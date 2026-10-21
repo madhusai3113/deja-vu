@@ -2489,11 +2489,20 @@ func hiddenByOwnSettings() string {
 	// both "project patterns" told someone who had excluded their only store
 	// that a project of theirs was hidden.
 	stores := sources.ExcludedHarnesses()
-	if n := len(sources.ExclusionPatterns()) - len(stores); n > 0 {
+	if n := projectExcludePatterns(); n > 0 {
 		parts = append(parts, fmt.Sprintf("%d project pattern%s excluded from indexing (%s)", n, pluralS(n), sources.ExcludePath()))
 	}
 	if n := len(stores); n > 0 {
-		parts = append(parts, fmt.Sprintf("%d store%s not read at all (%s)", n, pluralS(n), sources.ExcludePath()))
+		settings := map[string]bool{}
+		for name := range stores {
+			settings[harnessExclusionSource(name)] = true
+		}
+		var names []string
+		for name := range settings {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		parts = append(parts, fmt.Sprintf("%d store%s not read at all (%s)", n, pluralS(n), strings.Join(names, ", ")))
 	}
 	if len(parts) == 0 {
 		return ""
@@ -3905,13 +3914,21 @@ func projectExcludePatterns() int {
 
 // An environment exclusion must not be attributed to the exclude file.
 // Prefer the environment when both settings exclude the same store.
-func harnessExclusionReason(name string) string {
+func harnessExclusionSource(name string) string {
 	for _, excluded := range strings.Split(os.Getenv("DEJA_EXCLUDE_HARNESSES"), ",") {
 		if strings.EqualFold(strings.TrimSpace(excluded), name) {
-			return "excluded — DEJA_EXCLUDE_HARNESSES"
+			return "DEJA_EXCLUDE_HARNESSES"
 		}
 	}
-	return fmt.Sprintf("excluded — `harness:%s` is in %s", name, sources.ExcludePath())
+	return sources.ExcludePath()
+}
+
+func harnessExclusionReason(name string) string {
+	setting := harnessExclusionSource(name)
+	if setting == "DEJA_EXCLUDE_HARNESSES" {
+		return "excluded — " + setting
+	}
+	return fmt.Sprintf("excluded — `harness:%s` is in %s", name, setting)
 }
 
 func printSources(dir string) {
